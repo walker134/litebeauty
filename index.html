@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>LiteBeauty - 轻量美颜相机 | 免费在线人像美化工具</title>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!--  SEO / Open Graph / Twitter Card                             -->
+  <!--  ⚠ 部署后将 YOUR_DOMAIN 替换为实际域名                         -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <meta name="description" content="LiteBeauty 是一款免费在线美颜工具，支持亮度/对比度/饱和度调节、AI 人脸识别磨皮、红眼消除，无需下载即可在浏览器中使用。">
+  <meta name="keywords" content="美颜相机,在线美颜,人脸识别,磨皮,红眼消除,照片美化,AI美颜,PWA">
+  <meta name="author" content="LiteBeauty">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://YOUR_DOMAIN/">
+
+  <!-- Open Graph (Facebook / Telegram / LinkedIn) -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="LiteBeauty - 轻量美颜相机">
+  <meta property="og:description" content="免费在线人像美化工具，AI 人脸识别 + 智能磨皮 + 红眼消除，打开浏览器即用。">
+  <meta property="og:url" content="https://YOUR_DOMAIN/">
+  <meta property="og:image" content="https://YOUR_DOMAIN/icon-512.png">
+  <meta property="og:image:width" content="512">
+  <meta property="og:image:height" content="512">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:site_name" content="LiteBeauty">
+  <meta property="og:locale" content="zh_CN">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="LiteBeauty - 轻量美颜相机">
+  <meta name="twitter:description" content="免费在线人像美化工具，AI 人脸识别磨皮 + 红眼消除。">
+  <meta name="twitter:image" content="https://YOUR_DOMAIN/icon-512.png">
+
+  <!-- 微信分享（使用 Open Graph 标签，额外指定） -->
+  <meta itemprop="name" content="LiteBeauty - 轻量美颜相机">
+  <meta itemprop="description" content="免费在线美颜工具，AI 人脸识别 + 智能磨皮 + 红眼消除。">
+  <meta itemprop="image" content="https://YOUR_DOMAIN/icon-512.png">
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- face-api.js（主线程回退用，Worker 中会独立加载） -->
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <!-- cropperjs 图片裁剪库 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+  <!-- heic2any：iOS HEIC 格式转 JPG -->
+  <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+
+  <style>
+    /* ── 滑块通用样式 ── */
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 6px; border-radius: 3px;
+      background: #d1d5db; outline: none;
+      touch-action: none;  /* 防止滑动滑块时页面滚动 */
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 24px; height: 24px; border-radius: 50%;
+      background: #ec4899; border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2); cursor: pointer;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: #ec4899; border: 2px solid #fff; cursor: pointer;
+    }
+    .smart-slider::-webkit-slider-thumb { background: #a855f7; }
+    .smart-slider::-moz-range-thumb      { background: #a855f7; }
+
+    /* ── 画布容器 ── */
+    .canvas-wrapper {
+      position: relative; width: 100%; max-height: 60vh;
+      display: flex; align-items: center; justify-content: center;
+      background: #1f2937; border-radius: 12px; overflow: hidden;
+      touch-action: manipulation; /* 允许双指缩放，阻止双击缩放 */
+    }
+    canvas { display: block; max-width: 100%; max-height: 60vh; object-fit: contain; }
+
+    /* ── 开关 (Toggle) 样式 ── */
+    .toggle-track {
+      width: 44px; height: 24px; border-radius: 12px;
+      background: #374151; transition: background 0.2s;
+    }
+    .toggle-knob {
+      position: absolute; top: 2px; left: 2px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #fff; transition: transform 0.2s;
+    }
+    input:checked + .toggle-track { background: #a855f7; }
+    input:checked + .toggle-track .toggle-knob { transform: translateX(20px); }
+
+    /* ── 预设横向滚动容器 ── */
+    .preset-scroll {
+      overflow-x: auto;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+      touch-action: pan-x; /* 仅允许水平滑动 */
+    }
+    .preset-scroll::-webkit-scrollbar { display: none; }
+
+    /* ── 预设卡片 ── */
+    .preset-card {
+      transition: transform 0.1s ease, background-color 0.15s;
+    }
+    .preset-card:active {
+      transform: scale(0.94);
+    }
+    .preset-card .delete-btn {
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .preset-card:hover .delete-btn,
+    .preset-card:active .delete-btn {
+      opacity: 1;
+    }
+    @media (hover: none) {
+      .preset-card .delete-btn { opacity: 0.6; }
+    }
+
+    /* ── 裁剪比例按钮 ── */
+    .crop-ratio-btn.active {
+      background: #7c3aed; color: #fff;
+    }
+
+    /* ── 滤镜卡片 ── */
+    .filter-card {
+      transition: transform 0.1s ease, border-color 0.15s;
+      border: 2px solid transparent;
+    }
+    .filter-card.active {
+      border-color: #a855f7;
+      transform: scale(1.03);
+    }
+    .filter-card:active { transform: scale(0.94); }
+
+    /* ── cropperjs 暗色主题覆盖 ── */
+    .cropper-modal { background-color: #000; opacity: 0.6; }
+    .cropper-view-box { outline-color: rgba(236, 72, 153, 0.7); }
+    .cropper-face { background-color: transparent; }
+
+    /* ── 安装按钮呼吸动画 ── */
+    @keyframes install-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+      50%      { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);   }
+    }
+    .install-btn-pulse {
+      animation: install-pulse 2s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body class="bg-gray-950 text-white min-h-screen flex flex-col">
+
+  <!-- ================================================================ -->
+  <!--  顶部状态栏                                                        -->
+  <!-- ================================================================ -->
+  <header class="flex items-center justify-between px-3 py-2.5 bg-gray-900/80 backdrop-blur border-b border-gray-800">
+    <div class="flex items-center gap-1">
+      <!-- 撤销 -->
+      <button id="undoBtn" disabled
+        class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-600
+          enabled:text-gray-300 enabled:hover:bg-gray-700 enabled:active:scale-95 transition"
+        title="撤销 (Ctrl+Z)">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+        </svg>
+      </button>
+      <!-- 重做 -->
+      <button id="redoBtn" disabled
+        class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-600
+          enabled:text-gray-300 enabled:hover:bg-gray-700 enabled:active:scale-95 transition"
+        title="重做 (Ctrl+Y)">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
+        </svg>
+      </button>
+      <!-- 对比模式切换 -->
+      <button id="compareModeBtn"
+        class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500
+          hover:bg-gray-700 hover:text-gray-300 active:scale-95 transition ml-1"
+        title="切换对比模式：长按 / 滑动">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" />
+        </svg>
+      </button>
+      <h1 class="text-lg font-bold tracking-wide text-pink-400 ml-1">LiteBeauty</h1>
+    </div>
+    <span class="text-xs text-gray-500">轻量美颜相机</span>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!--  模式切换选项卡                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <nav class="flex px-3 pt-3 gap-1">
+    <button id="tabAlbum" class="flex-1 py-2 text-sm font-medium rounded-lg bg-pink-600 text-white transition">
+      相册
+    </button>
+    <button id="tabCamera" class="flex-1 py-2 text-sm font-medium rounded-lg bg-gray-800 text-gray-400 hover:bg-gray-700 transition">
+      拍照
+    </button>
+  </nav>
+
+  <!-- ================================================================ -->
+  <!--  主体内容                                                          -->
+  <!-- ================================================================ -->
+  <main class="flex-1 flex flex-col items-center px-3 py-4 gap-4">
+
+    <!-- ── 相册模式：图片预览区 ── -->
+    <div id="albumPreview" class="canvas-wrapper w-full">
+
+    <!-- ── 图片预览区 ── -->
+    <div class="canvas-wrapper w-full">
+      <div id="placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 pointer-events-none">
+        <svg class="w-12 h-12 mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5z" />
+        </svg>
+        <span class="text-sm">选择一张图片开始编辑</span>
+      </div>
+      <canvas id="canvas"></canvas>
+      <!-- 对比视图：原图层（长按显示，滑动对比可切换） -->
+      <canvas id="compareCanvas" class="absolute inset-0 hidden"></canvas>
+      <!-- 原图标签 -->
+      <div id="compareBadge" class="absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1
+        bg-black/70 text-white text-xs font-medium rounded-full pointer-events-none hidden">
+        原图
+      </div>
+      <!-- 滑动对比分割线 -->
+      <!-- 裁剪目标图片（cropperjs 使用） -->
+      <img id="cropImage" class="hidden" style="max-width:100%; max-height:60vh; display:none;">
+      <div id="compareDivider" class="absolute top-0 bottom-0 z-10 hidden"
+        style="width:3px; background:#fff; box-shadow:0 0 8px rgba(0,0,0,0.6); pointer-events:none;">
+      </div>
+      <!-- 液化笔刷光标预览 -->
+      <div id="brushCursor" class="absolute hidden rounded-full pointer-events-none z-20"
+        style="border:2px solid rgba(236,72,153,0.7); background:rgba(236,72,153,0.08);
+          transform:translate(-50%,-50%); box-shadow:0 0 0 1px rgba(236,72,153,0.15) inset;">
+      </div>
+    </div>
+    </div>
+
+    <!-- ── 拍照模式：实时预览区（默认隐藏） ── -->
+    <div id="cameraPreview" class="w-full hidden flex-col items-center gap-3" style="flex:1;">
+      <div class="relative w-full flex-1 bg-black rounded-xl overflow-hidden flex items-center justify-center"
+        style="min-height: 50vh;">
+        <!-- 摄像头原始采集 video（隐藏） -->
+        <video id="liveVideo" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover"></video>
+        <!-- 处理后的实时预览 Canvas -->
+        <canvas id="liveCanvas" class="absolute inset-0 w-full h-full object-cover"></canvas>
+        <!-- 美颜状态指示 -->
+        <div id="liveBeautyBadge" class="absolute top-3 right-3 px-2 py-0.5 rounded-full text-xs
+          bg-pink-600/80 text-white hidden">美颜中</div>
+      </div>
+
+      <!-- 底部快门按钮 -->
+      <button id="shutterBtn"
+        class="w-16 h-16 rounded-full border-4 border-white bg-white/20 hover:bg-white/30
+          active:scale-90 transition flex items-center justify-center shadow-lg">
+        <div class="w-12 h-12 rounded-full bg-white"></div>
+      </button>
+    </div>
+
+    <!-- ── 批量处理面板（默认隐藏） ── -->
+    <div id="batchPanel" class="w-full bg-gray-900 rounded-xl p-3 space-y-3 hidden">
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-medium text-gray-300">批量处理</span>
+        <span id="batchCount" class="text-xs text-gray-500">0 张</span>
+      </div>
+      <div id="batchThumbList" class="flex gap-2 overflow-x-auto pb-1"></div>
+      <div class="flex gap-2">
+        <button id="batchClearBtn"
+          class="flex-1 py-2 bg-gray-700 hover:bg-gray-600 active:scale-[0.98] rounded-lg text-xs transition">
+          清空
+        </button>
+        <button id="batchExportBtn"
+          class="flex-1 py-2 bg-violet-600 hover:bg-violet-700 active:scale-[0.98] rounded-lg text-xs font-medium transition">
+          导出全部
+        </button>
+      </div>
+    </div>
+
+    <!-- ── 裁剪模式 UI（默认隐藏） ── -->
+    <div id="cropUI" class="w-full bg-gray-900 rounded-xl p-3 space-y-3 hidden">
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-medium text-gray-300">裁剪图片</span>
+        <div class="flex gap-2">
+          <button id="cropRatioFree" class="crop-ratio-btn px-2.5 py-1 text-xs rounded bg-violet-600 text-white transition" data-ratio="">自由</button>
+          <button id="cropRatio1x1" class="crop-ratio-btn px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-400 hover:bg-gray-600 transition" data-ratio="1:1">1:1</button>
+          <button id="cropRatio4x3" class="crop-ratio-btn px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-400 hover:bg-gray-600 transition" data-ratio="4:3">4:3</button>
+          <button id="cropRatio16x9" class="crop-ratio-btn px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-400 hover:bg-gray-600 transition" data-ratio="16:9">16:9</button>
+        </div>
+      </div>
+      <div class="flex gap-3">
+        <button id="cropCancelBtn"
+          class="flex-1 py-2.5 bg-gray-700 hover:bg-gray-600 active:scale-[0.98] rounded-lg text-sm transition">
+          取消
+        </button>
+        <button id="cropConfirmBtn"
+          class="flex-1 py-2.5 bg-pink-600 hover:bg-pink-700 active:scale-[0.98] rounded-lg text-sm font-medium transition">
+          确认裁剪
+        </button>
+      </div>
+    </div>
+
+    <!-- ── 控制面板 ── -->
+    <div id="controlPanel" class="w-full bg-gray-900 rounded-xl p-4 space-y-5">
+
+      <!-- 按钮行 1：输入 + 编辑工具 -->
+      <div class="grid grid-cols-3 gap-3">
+        <label for="fileInput"
+          class="flex items-center justify-center gap-1.5 py-2.5 bg-pink-600 hover:bg-pink-700 active:scale-[0.98] rounded-lg text-xs font-medium cursor-pointer transition">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+          </svg>
+          上传
+        </label>
+        <input type="file" id="fileInput" accept="image/*" class="hidden">
+        <!-- 批量上传 -->
+        <input type="file" id="batchFileInput" accept="image/*" multiple class="hidden">
+        <button id="batchBtn"
+          class="flex items-center justify-center gap-1.5 py-2.5 bg-violet-700 hover:bg-violet-600 active:scale-[0.98] rounded-lg text-xs font-medium transition">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 4h4l1.5-1.5h7L17 4h4a1 1 0 011 1v14a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1z"/>
+          </svg>
+          批量
+        </button>
+
+        <button id="cameraBtn"
+          class="flex items-center justify-center gap-1.5 py-2.5 bg-gray-700 hover:bg-gray-600 active:scale-[0.98] rounded-lg text-xs font-medium transition">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
+          </svg>
+          拍照
+        </button>
+
+        <button id="cropBtn"
+          class="flex items-center justify-center gap-1.5 py-2.5 bg-gray-700 hover:bg-gray-600 active:scale-[0.98] rounded-lg text-xs font-medium transition">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M6 2v4m0 0H2m4 0h3m9 10v4m0 0h4m-4 0h-3m-9-5h.01M8 12h.01M12 12h.01M16 12h.01" />
+          </svg>
+          裁剪
+        </button>
+      </div>
+
+      <!-- 按钮行 2：旋转 + 重置 -->
+      <div class="grid grid-cols-3 gap-3">
+        <button id="rotateLeftBtn"
+          class="flex items-center justify-center gap-1.5 py-2.5 bg-gray-700 hover:bg-gray-600 active:scale-[0.98] rounded-lg text-xs font-medium transition">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+          </svg>
+          左转
+        </button>
+
+        <button id="rotateRightBtn"
+          class="flex items-center justify-center gap-1.5 py-2.5 bg-gray-700 hover:bg-gray-600 active:scale-[0.98] rounded-lg text-xs font-medium transition">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
+          </svg>
+          右转
+        </button>
+
+        <button id="resetBtn"
+          class="flex items-center justify-center gap-1.5 py-2.5 bg-gray-700 hover:bg-gray-600 active:scale-[0.98] rounded-lg text-xs font-medium transition">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
+          </svg>
+          重置
+        </button>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <!--  工具模式切换                                                     -->
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <div class="border-t border-gray-800 pt-4">
+        <div class="flex gap-2">
+          <button id="toolBeauty"
+            class="flex-1 py-2 text-xs font-medium rounded-lg bg-pink-600 text-white transition">
+            美颜调整
+          </button>
+          <button id="toolLiquify"
+            class="flex-1 py-2 text-xs font-medium rounded-lg bg-gray-800 text-gray-400 hover:bg-gray-700 transition">
+            手动液化
+          </button>
+        </div>
+      </div>
+
+      <!-- ── 液化控制（默认隐藏） ── -->
+      <div id="liquifyControls" class="space-y-3 hidden">
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>笔刷大小</span>
+            <span id="brushSizeVal">40px</span>
+          </div>
+          <input type="range" id="brushSize" min="10" max="100" value="40" step="1">
+        </div>
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>液化强度</span>
+            <span id="liquifyStrVal">30</span>
+          </div>
+          <input type="range" id="liquifyStrength" min="10" max="50" value="30" step="1">
+        </div>
+        <button id="resetLiquifyBtn"
+          class="w-full py-2 bg-gray-700 hover:bg-gray-600 active:scale-[0.98] rounded-lg text-xs font-medium transition">
+          重置液化
+        </button>
+      </div>
+
+      <!-- 保存预设 + 保存照片 -->
+      <button id="savePresetBtn"
+        class="w-full flex items-center justify-center gap-2 py-2.5 bg-violet-600 hover:bg-violet-700 active:scale-[0.98] rounded-lg text-sm font-medium transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+        </svg>
+        保存预设
+      </button>
+
+      <button id="savePhotoBtn"
+        class="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-pink-600 to-violet-600
+          hover:from-pink-500 hover:to-violet-500 active:scale-[0.98] rounded-lg text-sm font-bold transition shadow-lg shadow-pink-600/20">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+        </svg>
+        保存照片
+      </button>
+
+      <!-- ── 导出格式选项 ── -->
+      <div class="flex items-center gap-3 text-xs text-gray-500 mt-1">
+        <span>格式</span>
+        <button id="fmtJPEG" class="export-fmt-btn px-2.5 py-1 rounded bg-pink-600 text-white text-xs transition" data-fmt="jpeg">JPEG</button>
+        <button id="fmtPNG"  class="export-fmt-btn px-2.5 py-1 rounded bg-gray-700 text-gray-400 hover:bg-gray-600 text-xs transition" data-fmt="png">PNG</button>
+        <button id="fmtWebP" class="export-fmt-btn px-2.5 py-1 rounded bg-gray-700 text-gray-400 hover:bg-gray-600 text-xs transition" data-fmt="webp">WebP</button>
+        <span class="ml-auto">质量</span>
+        <span id="exportQualityVal">90%</span>
+      </div>
+      <input type="range" id="exportQuality" min="50" max="100" value="90" step="1" class="mt-0.5">
+
+      <!-- ── 分隔线 + 智能美颜开关 ── -->
+      <div class="border-t border-gray-800 pt-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-medium text-gray-300">智能美颜</span>
+          <span id="detectionStatus" class="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-500">
+            模型未加载
+          </span>
+        </div>
+        <label class="relative inline-flex cursor-pointer">
+          <input type="checkbox" id="smartBeautyToggle" class="sr-only peer">
+          <span class="toggle-track block relative">
+            <span class="toggle-knob block"></span>
+          </span>
+        </label>
+      </div>
+
+      <!-- ── 智能美颜滑块（默认隐藏） ── -->
+      <div id="smartSliders" class="space-y-4 hidden">
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>磨皮强度</span>
+            <span id="smoothingVal">50%</span>
+          </div>
+          <input type="range" id="smoothing" class="smart-slider" min="0" max="100" value="50" step="1">
+        </div>
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>红眼消除</span>
+            <span id="redEyeVal">50%</span>
+          </div>
+          <input type="range" id="redEye" class="smart-slider" min="0" max="100" value="50" step="1">
+        </div>
+        <!-- 瘦脸 -->
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>瘦脸</span>
+            <span id="slimFaceVal">0%</span>
+          </div>
+          <input type="range" id="slimFace" class="smart-slider" min="0" max="100" value="0" step="1">
+        </div>
+        <!-- 小头 -->
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>小头</span>
+            <span id="smallHeadVal">0%</span>
+          </div>
+          <input type="range" id="smallHead" class="smart-slider" min="0" max="100" value="0" step="1">
+        </div>
+        <!-- 大眼 -->
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>大眼</span>
+            <span id="bigEyeVal">0%</span>
+          </div>
+          <input type="range" id="bigEye" class="smart-slider" min="0" max="100" value="0" step="1">
+        </div>
+        <!-- 牙齿美白 -->
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>牙齿美白</span>
+            <span id="teethWhitenVal">0%</span>
+          </div>
+          <input type="range" id="teethWhiten" class="smart-slider" min="0" max="100" value="0" step="1">
+        </div>
+      </div>
+
+      <!-- ── LUT 滤镜选择 ── -->
+      <div class="border-t border-gray-800 pt-4">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">滤镜</span>
+          <button id="uploadLUTBtn" class="text-xs text-violet-400 hover:text-violet-300 transition">+ 自定义</button>
+          <input type="file" id="lutFileInput" accept="image/*" class="hidden">
+        </div>
+        <div id="filterList" class="preset-scroll flex gap-2.5 overflow-x-auto pb-1">
+          <!-- 动态渲染 -->
+        </div>
+        <!-- 滤镜强度（默认隐藏，选中非原图滤镜后显示） -->
+        <div id="filterStrengthRow" class="mt-3 hidden">
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>滤镜强度</span>
+            <span id="filterStrengthVal">100%</span>
+          </div>
+          <input type="range" id="filterStrength" class="smart-slider" min="0" max="100" value="100" step="1">
+        </div>
+      </div>
+
+      <!-- ── 预设列表 ── -->
+      <div class="border-t border-gray-800 pt-4">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">预设</span>
+        </div>
+        <div id="presetListContainer" class="preset-scroll flex gap-2 overflow-x-auto pb-1">
+        </div>
+      </div>
+
+      <!-- ── 基础调整滑块 ── -->
+      <div class="border-t border-gray-800 pt-4 space-y-4">
+        <div class="flex justify-between text-xs text-gray-500 mb-1">
+          <span>基础调整</span>
+        </div>
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>亮度</span>
+            <span id="brightnessVal">100%</span>
+          </div>
+          <input type="range" id="brightness" min="0" max="200" value="100" step="1">
+        </div>
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>对比度</span>
+            <span id="contrastVal">100%</span>
+          </div>
+          <input type="range" id="contrast" min="0" max="200" value="100" step="1">
+        </div>
+        <div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>饱和度</span>
+            <span id="saturateVal">100%</span>
+          </div>
+          <input type="range" id="saturate" min="0" max="200" value="100" step="1">
+        </div>
+      </div>
+
+      <!-- ── 水印设置 ── -->
+      <div class="border-t border-gray-800 pt-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">水印</span>
+          <label class="relative inline-flex cursor-pointer">
+            <input type="checkbox" id="watermarkToggle" class="sr-only peer">
+            <span class="toggle-track block relative">
+              <span class="toggle-knob block"></span>
+            </span>
+          </label>
+        </div>
+        <div id="watermarkSettings" class="space-y-3 hidden">
+          <input type="text" id="watermarkText" maxlength="30" placeholder="输入水印文字"
+            class="w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:border-pink-500 outline-none">
+          <div class="flex gap-2">
+            <button class="wm-pos-btn px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-400 hover:bg-gray-600 transition" data-pos="tl">左上</button>
+            <button class="wm-pos-btn px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-400 hover:bg-gray-600 transition" data-pos="tr">右上</button>
+            <button class="wm-pos-btn px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-400 hover:bg-gray-600 transition" data-pos="center">居中</button>
+            <button class="wm-pos-btn px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-400 hover:bg-gray-600 transition" data-pos="bl">左下</button>
+            <button class="wm-pos-btn px-2.5 py-1 text-xs rounded bg-violet-600 text-white transition" data-pos="br">右下</button>
+          </div>
+          <div class="flex justify-between text-xs text-gray-400">
+            <span>水印透明度</span>
+            <span id="watermarkOpacityVal">50%</span>
+          </div>
+          <input type="range" id="watermarkOpacity" min="10" max="100" value="50" step="1">
+        </div>
+      </div>
+
+      <!-- ── PWA 安装按钮（默认隐藏，仅支持 PWA 时显示） ── -->
+      <div class="border-t border-gray-800 pt-4">
+        <button id="installBtn"
+          class="hidden w-full flex items-center justify-center gap-2 py-3 bg-green-600 hover:bg-green-700
+            active:scale-[0.98] rounded-lg text-sm font-medium transition install-btn-pulse">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          安装应用
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!--  变现预留区：广告 + 打赏                                       -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <footer class="w-full px-3 pb-6 space-y-4">
+
+    <!-- ── Google AdSense 广告位（申请通过后取消注释） ── -->
+    <!--
+    <div class="w-full bg-gray-900 rounded-xl p-4">
+      <div class="text-xs text-gray-600 text-center mb-2">广告</div>
+      <ins class="adsbygoogle"
+           style="display:block"
+           data-ad-client="ca-pub-XXXXXXXXXXXXXXXX"
+           data-ad-slot="XXXXXXXXXX"
+           data-ad-format="auto"
+           data-full-width-responsive="true"></ins>
+      <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+    </div>
+    -->
+
+    <!-- ── 打赏 / 支持作者 ── -->
+    <div id="donateSection" class="w-full bg-gray-900 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-sm font-medium text-gray-300">支持作者</span>
+        <span class="text-xs text-gray-600">如果这个工具对你有帮助 ☕</span>
+      </div>
+      <div class="flex items-center gap-4 justify-center">
+        <!-- 爱发电 -->
+        <a href="https://afdian.com/a/layman_134" target="_blank" rel="noopener"
+          class="flex flex-col items-center gap-1.5 py-2 px-4 bg-gray-800 hover:bg-gray-700
+            rounded-lg transition active:scale-[0.98]">
+          <svg class="w-6 h-6 text-orange-400" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+          </svg>
+          <span class="text-xs text-gray-400">爱发电</span>
+        </a>
+        <!-- GitHub Star -->
+        <a href="https://github.com/walker134/litebeauty" target="_blank" rel="noopener"
+          class="flex flex-col items-center gap-1.5 py-2 px-4 bg-gray-800 hover:bg-gray-700
+            rounded-lg transition active:scale-[0.98]">
+          <svg class="w-6 h-6 text-yellow-400" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2C6.48 2 2 6.48 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.09.38-1.98 1.02-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02A9.56 9.56 0 0112 6.8c.85.004 1.71.115 2.51.337 1.9-1.29 2.74-1.02 2.74-1.02.55 1.38.2 2.4.1 2.65.64.7 1.02 1.59 1.02 2.68 0 3.82-2.34 4.66-4.57 4.91.36.31.68.92.68 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0012 2z"/>
+          </svg>
+          <span class="text-xs text-gray-400">Star</span>
+        </a>
+      </div>
+      <p class="text-xs text-gray-600 text-center mt-3 leading-relaxed">
+        通过爱发电可使用微信/支付宝打赏，平台保护双方隐私，创作者支持化名。
+        部署前请替换上方两个链接中的中文占位符。
+      </p>
+    </div>
+  </footer>
+
+  <!-- 摄像头预览 video（隐藏） -->
+  <video id="cameraVideo" autoplay playsinline class="hidden"></video>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!--  滤镜引擎 + 主应用脚本                                       -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <script src="filters.js"></script>
+  <script src="app.js"></script>
+
+  <!-- HEIC 转换加载遮罩 -->
+  <div id="heicOverlay" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center hidden">
+    <div class="bg-gray-900 rounded-xl px-6 py-4 text-center">
+      <div class="w-8 h-8 border-2 border-pink-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+      <span class="text-sm text-gray-300">正在转换格式...</span>
+    </div>
+  </div>
+
+  <!-- Toast 通知 -->
+  <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5
+    bg-green-600 text-white text-sm font-medium rounded-full shadow-lg
+    opacity-0 translate-y-4 pointer-events-none transition-all duration-300">
+    保存成功
+  </div>
+</body>
+</html>
